@@ -1,0 +1,50 @@
+; ────────────────────────────────────────────────────────────────
+; Passive I²C sniffer with START/STOP IRQs
+;   • SDA on pin 0   (set in_init below if you change)
+;   • SCL on pin 1
+;   • IRQ 0  → START  (including repeated START)
+;   • IRQ 1  → STOP
+;   • Each 8-bit data byte -> RX FIFO (ACK is discarded)
+; ────────────────────────────────────────────────────────────────
+.program i2c_sniffer
+.side_set 0 opt
+.wrap_target
+
+wait_start:
+    wait 1 pin 1        ; SCL high
+    wait 1 pin 0        ; SDA high
+    wait 0 pin 0        ; SDA falling edge (START)
+    irq set 0           ; START detected
+    wait 0 pin 1        ; wait until SCL low again
+
+byte_loop:
+    set x, 7
+bit_loop:
+    wait 1 pin 1        ; SCL rising edge
+    in pins, 1          ; sample SDA
+    wait 0 pin 1        ; SCL falling edge
+    jmp x-- bit_loop
+    push block          ; push byte
+
+    wait 1 pin 1        ; ACK bit (skip sampling)
+    wait 0 pin 1        ; ACK bit falling edge
+
+    wait 1 pin 1        ; SCL high to detect STOP or repeated START
+    jmp pin check_stop  ; if SDA high, potential STOP
+    jmp byte_loop       ; SDA low, continue byte
+
+check_stop:
+    wait 1 pin 1        ; double-check stability (SDA still high → STOP)
+    jmp pin do_stop     ; still high = STOP
+
+    ; SDA fell again → repeated START
+    irq set 0           ; repeated START IRQ
+    wait 0 pin 1
+    jmp byte_loop
+
+do_stop:
+    irq set 1           ; STOP IRQ
+    wait 0 pin 1
+    jmp wait_start
+
+.wrap
